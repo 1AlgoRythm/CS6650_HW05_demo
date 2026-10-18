@@ -2,6 +2,10 @@
 
 A Go server with the two Product endpoints from `api.yaml`. Terraform builds its Docker image, pushes the image to ECR, and runs it on ECS with Fargate. Products are stored in memory. The server exposes Prometheus metrics and writes one JSON log line per request.
 
+## How it fits together
+
+Terraform builds the image from `src/`, pushes it to ECR, and starts one ECS task on Fargate that runs it. The task has a public IP address and listens on port 8080. The server writes its logs to CloudWatch. The monitoring stack runs on the local machine and reads `/metrics` from the task.
+
 ## Where things are
 
 | What | Where |
@@ -59,7 +63,18 @@ terraform init
 terraform apply -auto-approve
 ```
 
-Terraform builds the image for `linux/amd64`, pushes it to ECR, and starts the ECS service. The task can take a few minutes to start after the apply ends.
+Terraform builds the image for `linux/amd64`, pushes it to ECR, and starts the ECS service. The task definition sets no CPU architecture, and AWS documents the default for Fargate as `X86_64`, so the image must be built for `linux/amd64`.
+
+The first apply took about a minute, because it builds and pushes the image. A successful apply ends with this line, and then prints two outputs:
+
+```
+Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+
+ecs_cluster_name = "hw05-product-api-cluster"
+ecs_service_name = "hw05-product-api"
+```
+
+The task can take a few minutes to start after the apply ends.
 
 On Docker Desktop for Mac, the file `/var/run/docker.sock` may not exist. Then Terraform stops with "Cannot connect to the Docker daemon". Point Terraform at the Docker Desktop socket first, in the same terminal:
 
@@ -95,13 +110,30 @@ Then call the server. It listens on port 8080:
 curl http://PUBLIC_IP:8080/products/1
 ```
 
-The address changes when a task is replaced. Run the command again to get the current one.
+A working server answers with status 200 and the JSON of the first product:
+
+```
+{"product_id":1,"sku":"ABC-123-XYZ","manufacturer":"Acme Corporation","category_id":456,"weight":1250,"some_other_id":789}
+```
+
+If the IP command fails or prints `None`, no task is running yet. Wait a minute and run it again. In the test runs the task appeared between right away and 4 minutes after the apply. The address changes when a task is replaced, so run the command again to get the current one.
 
 ### 4. Clean up
 
 ```
 terraform destroy -auto-approve
 ```
+
+Run this before the Learner Lab session ends. During this project the lab credentials were cancelled, the task kept running, and the `aws` commands for ECS and ECR were refused. To destroy after that, start a new session, run `aws configure` again with the new credentials, and run the destroy from the same `terraform/` folder. The file `terraform/terraform.tfstate` must still be in that folder, because it records what Terraform made.
+
+### Common problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Cannot connect to the Docker daemon` during the apply, on a Mac | Docker Desktop keeps its socket in `~/.docker/run/docker.sock` | Run the `export DOCKER_HOST=...` line from step 2 |
+| `AccessDeniedException` from `aws` commands, naming a policy `voc-cancel-cred` | The Learner Lab credentials were cancelled, for example because the session ended | Start the lab, copy the new credentials, and run the `aws configure` commands from step 1 again |
+| The IP command fails or prints `None` | No task is running yet | Wait a minute and run it again |
+| `curl` times out right after the apply | Most likely the task is still starting | Wait, then get the IP address again, because it may have changed |
 
 ## Run the server locally
 
@@ -232,11 +264,86 @@ The test used `FastHttpUser`, 4 workers, and a step shape: 100, 250, 500, 1,000,
 
 ![Stress test, charts](screenshots/locust-6-stress-charts.png)
 
-The test sent 907,615 requests, with 0 failures in Locust, and no 500 replies. The rate stopped growing at about 3,750 requests per second, from 500 users on. After that, more users only made the responses slower. The ECS task, with a quarter of a vCPU, averaged 96 to 100 percent CPU in each full minute from 16:59 to 17:02 EDT. The first and last minutes were partial: 1.4 percent and 35.8 percent on average. The 100-user step had a median of 38 ms, close to the 36 ms of the 50-user runs, so the task was probably not saturated at that step. ECS reports CPU in one-minute buckets, and they do not line up exactly with the 45-second steps. The data does not show the exact moment when the task became saturated. The four Locust workers used about 15 percent of a core each, so the load generator was not the limit.
+The test sent 907,615 requests, with 0 failures in Locust, and no 500 replies. The rate stopped growing at about 3,750 requests per second, from 500 users on. After that, more users only made the responses slower. The ECS task, with a quarter of a vCPU, averaged 96 to 100 percent CPU in each full minute from 16:59 to 17:02 EDT. The first and last minutes were partial: 1.4 percent and 35.8 percent on average. The 100-user step had a median of 38 ms, close to the 36 ms of the 50-user runs, That suggests the task was not yet saturated at that step, but the CPU data cannot confirm it. ECS reports CPU in one-minute buckets, and they do not line up exactly with the 45-second steps. The data does not show the exact moment when the task became saturated. The four Locust workers used about 15 percent of a core each, so the load generator was not the limit.
 
 ![ECS CPU utilization during the stress test](screenshots/ecs-cpu-during-stress.png)
 
 The time axis is UTC. Each point covers 5 minutes. The orange line is the maximum, and the green line is the average. The green point for 17:00 to 17:05 EDT is about 67 percent, because it averages the busy minutes with the idle minute that follows.
+
+### Rerun the 50-user comparison
+
+Save this file as `locustfile.py` in an empty folder. It is the file used for the comparison above.
+
+```python
+"""Load test for the HW5 Product API (GET /products/{id} and POST /products/{id}/details).
+
+Two user classes, identical except for the HTTP client underneath:
+  ProductUser     - HttpUser     (python-requests, the default)
+  ProductFastUser - FastHttpUser (geventhttpclient, written for high throughput)
+
+Pick one by name:  locust -f locustfile.py ProductUser
+GET : POST is 3 : 1 because of the weights in TASKS.
+Every request is valid, so a healthy server gives zero failures.
+"""
+import random
+
+from locust import FastHttpUser, HttpUser
+
+PRODUCT_IDS = [1, 2, 3]  # the three products the server starts with
+
+
+def get_product(user):
+    # name= groups every id under one row in the Locust statistics table
+    pid = random.choice(PRODUCT_IDS)
+    user.client.get(f"/products/{pid}", name="GET /products/[id]")
+
+
+def post_product(user):
+    pid = random.choice(PRODUCT_IDS)
+    user.client.post(
+        f"/products/{pid}/details",
+        json={
+            "product_id": pid,
+            "sku": "LOAD-TEST-SKU",
+            "manufacturer": "Locust",
+            "category_id": 9,
+            "weight": 100,
+            "some_other_id": 5,
+        },
+        name="POST /products/[id]/details",
+    )
+
+
+# {function: weight}. Locust only collects @task methods written directly on a
+# User class, so a shared mixin of @task methods ends up with "no tasks".
+# A tasks dict can be shared by any number of classes.
+TASKS = {get_product: 3, post_product: 1}
+
+
+class ProductUser(HttpUser):
+    tasks = TASKS
+
+
+class ProductFastUser(FastHttpUser):
+    tasks = TASKS
+```
+
+Start Locust with a web page at `http://localhost:8089`, then enter 50 users and a spawn rate of 10, and start the test:
+
+```
+docker run --rm -p 8089:8089 -v "$PWD":/mnt/locust locustio/locust \
+  -f /mnt/locust/locustfile.py -H http://PUBLIC_IP:8080 ProductUser
+```
+
+Or run it without the web page, for 60 seconds, with the faster client:
+
+```
+docker run --rm -v "$PWD":/mnt/locust locustio/locust \
+  -f /mnt/locust/locustfile.py -H http://PUBLIC_IP:8080 \
+  --headless -u 50 -r 10 -t 60s ProductFastUser
+```
+
+The 50-user runs above used one master and one worker started with Docker Compose, and the stress test used 4 workers. A single container runs the same users in one process. The stress test used a step shape and a class with a few expected refusals. Those two files are not part of this repo, and the step sizes are in the table above.
 
 ## Observability (Part V)
 
@@ -256,17 +363,17 @@ docker compose up -d --build
 | Prometheus | `http://localhost:9090` |
 | Grafana | `http://localhost:3000` |
 
-Grafana opens without a login, because the stack is meant for local use only. Prometheus scrapes two targets, listed in `monitoring/prometheus/targets.json`: the local app, labelled `where="local"`, and the deployed task, labelled `where="aws"`. The dashboard has a `target` dropdown to pick one. To watch the deployed task, put its public IP address in `targets.json`. Prometheus rereads the file by itself. To stop the stack, run `docker compose down`.
+Grafana opens without a login, because the stack is meant for local use only. Prometheus scrapes two targets, listed in `monitoring/prometheus/targets.json`: the local app, labelled `where="local"`, and the deployed task, labelled `where="aws"`. The dashboard has a `target` dropdown to pick one. To watch the deployed task, put its public IP address in `targets.json`. According to the Prometheus documentation, it watches the file and applies a change without a restart, and it also rereads the file every 5 minutes. To stop the stack, run `docker compose down`.
 
-The dashboard has panels for rate, errors and duration (p50 and p95), a panel of responses by status code, and three "now" numbers. The screenshot is from the stress test above. It starts with 2 minutes of quiet, then the load, then quiet again.
+The dashboard has panels for rate, errors and duration (p50 and p95), a panel of responses by status code, and three "now" numbers. The screenshot is from the stress test above. It starts with about 90 seconds of quiet, then the load, then quiet again.
 
 ![Grafana, idle then loaded](screenshots/grafana-idle-vs-loaded.png)
 
-At the peak the rate was about 2,780 reads and 995 writes per second. The errors were 3.4 percent for GET and 9.5 percent for POST, which are the requests refused on purpose. The median handler time stayed at about 0.3 ms. The 95th percentile of POST handler time rose to 400 ms in the last steps.
+At the peak the rate was about 2,780 GET requests and 995 POST requests per second. The errors were 3.4 percent for GET and 9.5 percent for POST, which are the requests refused on purpose. The median handler time stayed at about 0.3 ms. The 95th percentile of POST handler time rose to 400 ms in the last steps.
 
 ### The same signals in logs
 
-The server writes one JSON line per request to standard output. On AWS, CloudWatch Logs holds them in the log group `/ecs/hw05-product-api`. This excerpt is from the stress test, at 17:02:40 EDT, in the 2,000-user step. The time field is in UTC. The last two lines are one 404 and one 400 from the same moment.
+The server writes one JSON line per request to standard output. On AWS, CloudWatch Logs holds them in the log group `/ecs/hw05-product-api`. This excerpt is from the stress test, at 17:02:40 EDT, in the 2,000-user step. The time field is in UTC. The last two lines are one 404 and one 400, taken from within 0.1 seconds of the others.
 
 ```
 {"time":"2026-10-18T21:02:39.999999479Z","level":"INFO","msg":"request","method":"POST","endpoint":"/products/:productId/details","path":"/products/2/details","status":204,"duration_ms":0.013}
