@@ -2,3 +2,16 @@
 **.tfstate
 **.tfstate.*
 **/.terraform/
+# Terraform crash logs and saved plans
+crash.log
+crash.*.log
+*.tfplan
+
+# secrets and keys
+.env
+.env.*
+*.pem
+*.key
+
+# macOS
+.DS_Store

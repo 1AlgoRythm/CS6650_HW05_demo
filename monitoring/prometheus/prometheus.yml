@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: product-api
+    # The addresses to scrape are in targets.json. Prometheus rereads that file
+    # by itself, so a change needs no restart.
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets.json

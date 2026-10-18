@@ -46,6 +46,8 @@ resource "docker_image" "app" {
     # relative path from terraform/ → src/
     context = "../src"
     # Dockerfile defaults to "Dockerfile" in that context
+    # Fargate runs x86_64, so build for it even on an arm64 laptop.
+    platform = "linux/amd64"
   }
 }
 

@@ -1,0 +1,33 @@
+# Local monitoring stack for the Product API: the app, Prometheus and Grafana.
+# Start it from this folder with:  docker compose up -d --build
+services:
+  app:
+    build: ../src
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/targets.json:/etc/prometheus/targets.json:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana
+    environment:
+      # Local use only: open Grafana without a login screen.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

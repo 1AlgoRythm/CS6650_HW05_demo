@@ -1,0 +1,4 @@
+[
+  { "targets": ["app:8080"], "labels": { "where": "local" } },
+  { "targets": ["100.31.251.240:8080"], "labels": { "where": "aws" } }
+]

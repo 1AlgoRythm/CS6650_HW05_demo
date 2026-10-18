@@ -2,9 +2,11 @@
 # Manual edits may be lost in future updates.
 
 provider "registry.terraform.io/hashicorp/aws" {
-  version = "6.7.0"
+  version     = "6.7.0"
+  constraints = "~> 6.7.0"
   hashes = [
     "h1:iP8jjtdbeNVowu1JgUx76SGU1JsYj5JX10eRdMg9XwA=",
+    "h1:vISrEI1xUh0w7NXTQ9m6ZEnQ1dv02yy+EJvxW78DAoI=",
     "zh:3c0a256f813e5e2c1e1aa137204ad9168ebe487f6cee874af9e9c78eb300568e",
     "zh:3c49dd75ea28395b29ba259988826b956c8adf6c0b59dd8874feb4f47bad976a",
     "zh:3e6e3e3bfc6594f4f9e2c017ee588c5fcad394b87dd0b68a3f37cd66001f3c8c",
@@ -28,6 +30,7 @@ provider "registry.terraform.io/kreuzwerker/docker" {
   constraints = "~> 2.0"
   hashes = [
     "h1:0GQGmz25xaSRbFyAGXHhU6nmhR4lYN5NYtc6S+wv7pw=",
+    "h1:7SILKY4Mjkbs/AHre2QQEaq5qUiOqOzmJwQABrUul4o=",
     "zh:02ca00d987b2e56195d2e97d82349f680d4b94a6a0d514dc6c0031317aec4f11",
     "zh:432d333412f01b7547b3b264ec85a2627869fdf5f75df9d237b0dc6a6848b292",
     "zh:4709e81fea2b9132020d6c786a1d1d02c77254fc0e299ea1bb636892b6cadac6",

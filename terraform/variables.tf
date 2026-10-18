@@ -1,18 +1,18 @@
 # Region to deploy into
 variable "aws_region" {
   type    = string
-  default = "us-west-2"
+  default = "us-east-1"
 }
 
 # ECR & ECS settings
 variable "ecr_repository_name" {
   type    = string
-  default = "ecr_service"
+  default = "hw05-product-api"
 }
 
 variable "service_name" {
   type    = string
-  default = "CS6650L2"
+  default = "hw05-product-api"
 }
 
 variable "container_port" {
